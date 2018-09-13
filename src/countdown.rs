@@ -11,7 +11,7 @@ impl CountdownEvent {
     pub fn new(count: usize) -> Self {
         let result = Self {
             count: ATOMIC_USIZE_INIT,
-            event: ManualResetEvent::new(State::Unset),
+            event: ManualResetEvent::new(if count == 0 { State::Set } else { State::Unset }),
         };
 
         result.count.store(count, Ordering::Relaxed);
@@ -62,6 +62,12 @@ fn reset_countdown() {
     assert_eq!(countdown.wait0(), true);
     countdown.reset(1);
     assert_eq!(countdown.wait0(), false);
+}
+
+#[test]
+fn start_at_zero() {
+    let countdown = CountdownEvent::new(0);
+    assert_eq!(countdown.wait0(), true);
 }
 
 #[test]
