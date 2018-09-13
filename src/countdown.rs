@@ -11,8 +11,8 @@ pub struct CountdownEvent {
 /// given number of tasks to complete asynchronously, and then carry out some action. A countdown
 /// event is first initialized with a count equal to the number of outstanding tasks, and each time
 /// a task is completed, [`CountdownEvent::tick()`] is called. A call to
-/// [`CountdownEvent::wait()`](Awaitable::wait()) will block until all tasks have completed and the
-/// internal counter reaches 0.
+/// [`CountdownEvent::wait()`](Awaitable::wait()) will block until all outstanding tasks have
+/// completed and the internal counter reaches 0.
 ///
 /// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
 /// share across threads.
@@ -43,13 +43,18 @@ impl CountdownEvent {
     /// Resets a countdown event to the specified `count`. If a count of zero is specified, the
     /// event is immediately set.
     pub fn reset(&self, count: usize) {
-        self.count.store(count , Ordering::Relaxed);
+        self.count.store(count, Ordering::Relaxed);
         if count == 0 {
             self.event.set();
         }
         else {
             self.event.reset();
         }
+    }
+
+    /// Get the current internal countdown value.
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
     }
 }
 
