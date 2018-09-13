@@ -17,7 +17,8 @@ pub struct CountdownEvent {
 /// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
 /// share across threads.
 impl CountdownEvent {
-    /// Creates a new countdown event with the internal count initialized to `count`.
+    /// Creates a new countdown event with the internal count initialized to `count`. If a count of
+    /// zero is specified, the event is immediately set.
     pub fn new(count: usize) -> Self {
         let result = Self {
             count: ATOMIC_USIZE_INIT,
@@ -39,10 +40,16 @@ impl CountdownEvent {
         }
     }
 
-    /// Resets a countdown event to the specified `count`.
+    /// Resets a countdown event to the specified `count`. If a count of zero is specified, the
+    /// event is immediately set.
     pub fn reset(&self, count: usize) {
-        self.count.store(count, Ordering::Relaxed);
-        self.event.reset();
+        self.count.store(count , Ordering::Relaxed);
+        if count == 0 {
+            self.event.set();
+        }
+        else {
+            self.event.reset();
+        }
     }
 }
 
