@@ -1,6 +1,6 @@
-use rsevents::{Awaitable, Event, ManualResetEvent, State};
-use std::time::Duration;
+use rsevents::{Awaitable, ManualResetEvent, State};
 use std::sync::atomic::{AtomicUsize, Ordering, ATOMIC_USIZE_INIT};
+use std::time::Duration;
 
 pub struct CountdownEvent {
     count: AtomicUsize,
@@ -19,14 +19,14 @@ impl CountdownEvent {
         result
     }
 
-    fn tick(&self) {
+    pub fn tick(&self) {
         let old_ticks = self.count.fetch_sub(1, Ordering::Relaxed);
         if old_ticks == 1 {
             self.event.set();
         }
     }
 
-    fn reset(&self, count: usize) {
+    pub fn reset(&self, count: usize) {
         self.count.store(count, Ordering::Relaxed);
         self.event.reset();
     }
