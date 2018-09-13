@@ -1,0 +1,8 @@
+[package]
+name = "rsevents-extra"
+version = "0.1.0"
+authors = ["Mahmoud Al-Qudsi <mqudsi@neosmart.net>"]
+
+[dependencies]
+# rsevents = "0.1.1"
+rsevents = { path = "../rsevents/" }
