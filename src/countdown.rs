@@ -7,7 +7,17 @@ pub struct CountdownEvent {
     event: ManualResetEvent,
 }
 
+/// A countdown event is a special type of [`ManualResetEvent`] that makes it easy to wait for a
+/// given number of tasks to complete asynchronously, and then carry out some action. A countdown
+/// event is first initialized with a count equal to the number of outstanding tasks, and each time
+/// a task is completed, [`CountdownEvent::tick()`] is called. A call to
+/// [`CountdownEvent::wait()`](Awaitable::wait()) will block until all tasks have completed and the
+/// internal counter reaches 0.
+///
+/// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
+/// share across threads.
 impl CountdownEvent {
+    /// Creates a new countdown event with the internal count initialized to `count`.
     pub fn new(count: usize) -> Self {
         let result = Self {
             count: ATOMIC_USIZE_INIT,
@@ -19,6 +29,9 @@ impl CountdownEvent {
         result
     }
 
+    /// Decrements the internal countdown. When the internal countdown reaches zero, the countdown
+    /// event enters a [set](State::Set) state and any outstanding or future calls to
+    /// [`Awaitable::wait()`] will be let through without blocking (until [the event is reset](CountdownEvent::reset())).
     pub fn tick(&self) {
         let old_ticks = self.count.fetch_sub(1, Ordering::Relaxed);
         if old_ticks == 1 {
@@ -26,6 +39,7 @@ impl CountdownEvent {
         }
     }
 
+    /// Resets a countdown event to the specified `count`.
     pub fn reset(&self, count: usize) {
         self.count.store(count, Ordering::Relaxed);
         self.event.reset();
@@ -33,6 +47,7 @@ impl CountdownEvent {
 }
 
 impl Awaitable for CountdownEvent {
+    /// Waits for the internal countdown of the [`CountdownEvent`] to reach zero.
     fn wait(&self) {
         self.event.wait()
     }
