@@ -1,8 +1,15 @@
 [package]
 name = "rsevents-extra"
+description = "Useful events built on top of rsevents. Includes countdown event."
 version = "0.1.0"
-authors = ["Mahmoud Al-Qudsi <mqudsi@neosmart.net>"]
+authors = ["Mahmoud Al-Qudsi <mqudsi@neosmart.net>",
+		"NeoSmart Technologies <https://neosmart.net/>"]
+homepage = "https://github.com/neosmart/rsevents-extra"
+repository = "https://github.com/neosmart/rsevents-extra"
+readme = "README.md"
+keywords = ["synchronization", "events", "countdown"]
+categories = ["concurrency", "asynchronous"]
+license = "MIT"
 
 [dependencies]
-# rsevents = "0.1.1"
-rsevents = { path = "../rsevents/" }
+rsevents = "0.2"
