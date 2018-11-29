@@ -2,6 +2,7 @@
 name = "rsevents-extra"
 description = "Useful events built on top of rsevents. Includes countdown event."
 version = "0.1.0"
+edition = "2018"
 authors = ["Mahmoud Al-Qudsi <mqudsi@neosmart.net>",
 		"NeoSmart Technologies <https://neosmart.net/>"]
 homepage = "https://github.com/neosmart/rsevents-extra"

@@ -1,5 +1,3 @@
-extern crate rsevents;
-
 mod countdown;
 
 /// Re-export [`rsevents::Awaitable`] so consumers of this crate do not need to add an explicit
