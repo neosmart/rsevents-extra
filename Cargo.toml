@@ -13,4 +13,7 @@ categories = ["concurrency", "asynchronous"]
 license = "MIT"
 
 [dependencies]
-rsevents = "0.2"
+rsevents = { version = "0.3", path = "../rsevents/" }
+
+[dev-dependencies]
+crossbeam = "0.5"
