@@ -42,7 +42,11 @@ impl CountdownEvent {
 
     /// Resets a countdown event to the specified `count`. If a count of zero is specified, the
     /// countdown event is immediately set.
-    pub fn reset(&self, count: usize) {
+    ///
+    /// This requires a mutable reference to `self` to protect against attempting to reset a
+    /// countdown event that has extant threads already reporting their progress against it. Keep in
+    /// mind that calls to `reset()` can race with calls to `tick()`.
+    pub fn reset(&mut self, count: usize) {
         self.count.store(count, Ordering::Relaxed);
         if count == 0 {
             self.event.set();
@@ -66,10 +70,14 @@ impl Awaitable for CountdownEvent {
         self.event.try_wait()
     }
 
+    /// Waits for the internal countdown of the [`CountdownEvent`] to reach zero or returns an error
+    /// in case of a timeout.
     fn try_wait_for(&self, limit: Duration) -> Result<(), TimeoutError> {
         self.event.try_wait_for(limit)
     }
 
+    /// An optimized (wait-free, lock-free) check to see if the `CountdownEvent` has reached zero or
+    /// not.
     fn try_wait0(&self) -> Result<(), TimeoutError> {
         self.event.try_wait0()
     }
@@ -85,7 +93,7 @@ fn basic_countdown() {
 
 #[test]
 fn reset_countdown() {
-    let countdown = CountdownEvent::new(1);
+    let mut countdown = CountdownEvent::new(1);
     assert_eq!(countdown.wait0(), false);
     countdown.tick();
     assert_eq!(countdown.wait0(), true);

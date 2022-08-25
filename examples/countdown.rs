@@ -16,7 +16,7 @@ fn main() {
                 println!("Worker thread reporting for duty!");
 
                 // Worker thread will pretend to do some work
-                for i in (500*i)..(300*(i+1)) {
+                for i in (500*i)..(280*(i+1)) {
                     if i % 7 == 3 {
                         countdown.tick();
                     }
