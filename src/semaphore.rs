@@ -6,12 +6,10 @@ use rsevents::{Awaitable, EventState, AutoResetEvent, TimeoutError};
 type Count = u32;
 type AtomicCount = AtomicU32;
 
-pub struct Semaphore<'a, T> {
-    _lifetime: core::marker::PhantomData<&'a ()>,
+pub struct Semaphore {
     max: Count,
     count: AtomicCount,
     event: AutoResetEvent,
-    value: T
 }
 
 enum Timeout {
@@ -23,9 +21,9 @@ enum Timeout {
     Bounded(Duration),
 }
 
-impl<'a, T> Semaphore<'a, T>
+impl Semaphore
 {
-    pub const fn new(initial_count: Count, max_count: Count, value: T) -> Self {
+    pub const fn new(initial_count: Count, max_count: Count) -> Self {
         #[allow(unused_comparisons)]
         if max_count < 0 {
             panic!("Invalid max_count < 0");
@@ -39,16 +37,14 @@ impl<'a, T> Semaphore<'a, T>
         }
 
         Semaphore {
-            _lifetime: std::marker::PhantomData::<&'a ()>,
             max: max_count,
             count: AtomicCount::new(initial_count as Count),
             // The event is always unset unless there's contention around the max value
             event: AutoResetEvent::new(EventState::Unset),
-            value,
         }
     }
 
-    fn try_wait(&self, timeout: Timeout) -> Result<&T, TimeoutError> {
+    fn try_wait(&self, timeout: Timeout) -> Result<(), TimeoutError> {
         let mut count = self.count.load(Ordering::Relaxed);
 
         loop {
@@ -90,7 +86,7 @@ impl<'a, T> Semaphore<'a, T>
         }
         debug_assert!(count <= self.max);
 
-        Ok(&self.value)
+        Ok(())
     }
 
     pub fn release(&self, count: Count) {
@@ -105,22 +101,21 @@ impl<'a, T> Semaphore<'a, T>
     }
 }
 
-impl<'a, T> Awaitable for Semaphore<'a, T>
-where T: std::fmt::Debug {
+impl Awaitable for Semaphore {
     type T = ();
     type Error = TimeoutError;
 
-    fn try_wait(&self) -> Result<Self::T, Infallible> {
+    fn try_wait(&self) -> Result<(), Infallible> {
         self.try_wait(Timeout::Infinite).unwrap();
         Ok(())
     }
 
-    fn try_wait_for(&self, limit: Duration) -> Result<Self::T, rsevents::TimeoutError> {
+    fn try_wait_for(&self, limit: Duration) -> Result<(), rsevents::TimeoutError> {
         self.try_wait(Timeout::Bounded(limit))?;
         Ok(())
     }
 
-    fn try_wait0(&self) -> Result<Self::T, rsevents::TimeoutError> {
+    fn try_wait0(&self) -> Result<(), rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
         Ok(())
     }
@@ -136,19 +131,19 @@ mod test {
 
     #[test]
     fn uncontested_semaphore() {
-        let sem = Semaphore::new(1, 1, ());
+        let sem = Semaphore::new(1, 1);
         assert_eq!(true, sem.wait0());
         assert_eq!(false, sem.wait0());
     }
 
     #[test]
     fn zero_semaphore() {
-        let sem = Semaphore::new(0, 0, ());
+        let sem = Semaphore::new(0, 0);
         assert_eq!(false, sem.wait0());
     }
 
     fn release_x_of_y_sequentially(x: Count, y: Count) {
-        let sem: Semaphore<()> = Semaphore::new(0, y, ());
+        let sem: Semaphore = Semaphore::new(0, y);
 
         // use thread::scope because it automatically joins all threads
         thread::scope(|scope| {
@@ -169,7 +164,7 @@ mod test {
     }
 
     fn release_x_of_y(x: Count, y: Count) {
-        let sem: Semaphore<()> = Semaphore::new(0, y, ());
+        let sem: Semaphore = Semaphore::new(0, y);
 
         // use thread::scope because it automatically joins all threads
         thread::scope(|scope| {
