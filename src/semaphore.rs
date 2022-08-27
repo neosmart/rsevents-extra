@@ -6,6 +6,96 @@ use rsevents::{Awaitable, EventState, AutoResetEvent, TimeoutError};
 type Count = u32;
 type AtomicCount = AtomicU32;
 
+/// A concurrency-limiting synchronization primitive, used to limit the number of threads
+/// performing a certain operation or accessing a particular resource at the same time.
+///
+/// A `Semaphore` is created with a maximum concurrency count that can never be exceeded, and an
+/// initial concurrency count that determines the available concurrency at creation. Threads
+/// attempting to access a limited-concurrency resource or perform a concurrency-limited operation
+/// [wait on the `Semaphore`](Semaphore::wait()), an operation which either immediately grants
+/// access to the calling thread if the available concurrency has not been saturated or blocks,
+/// sleeping the thread until another thread completes its concurrency-limited operation or the
+/// available concurrency limit is further increased.
+///
+/// While the available concurrency count may be modified (decremented to zero or incremented up to
+/// the maximum specified at the time of its instantiation), the maximum concurrency limit cannot be
+/// changed once the `Semaphore` has been created.
+///
+/// ## Example:
+///
+/// ```no_run
+/// use rsevents_extra::{Awaitable, Semaphore};
+/// use std::sync::atomic::{AtomicU32, Ordering};
+///
+/// // Limit maximum number of simultaneous network requests to 4, but start
+/// // with only 1 simultaneous network request allowed.
+/// const MAX_REQUESTS: u32 = 4;
+/// const START_REQUESTS: u32 = 1;
+/// static HTTP_SEM: Semaphore = Semaphore::new(START_REQUESTS, MAX_REQUESTS);
+/// static TASKS_LEFT: AtomicU32 = AtomicU32::new(42);
+///
+/// fn download_file(url: &str) -> Result<Vec<u8>, std::io::Error> {
+///     fn inner_download_file(url: &str) -> Result<Vec<u8>, std::io::Error> {
+///         todo!();
+///     }
+///
+///     // Make sure we never exceed the maximum number of simultaneous
+///     // network connections allowed.
+///     HTTP_SEM.wait();
+///     // Now we can access the network guaranteeing that the HTTP_SEM concurrency
+///     // limit is respected.
+///     let result = inner_download_file(url);
+///     // Make sure we give up our network access slot to let another thread in.
+///     HTTP_SEM.release(1);
+///
+///     return result;
+/// }
+///
+/// fn get_file_from_cache(url: &str) -> Result<Vec<u8>, ()> { todo!() }
+///
+/// fn do_work() -> Result<(), std::io::Error> {
+///     loop {
+///         let mut file_in_cache = false;
+///         // Do some stuff that takes time here...
+///         // ...
+///         let url = "https://some-url/some/path/";
+///         let file = get_file_from_cache(url).or_else(|_| download_file(url))?;
+///         // Do something with the file...
+///         // ...
+///         TASKS_LEFT.fetch_sub(1, Ordering::Relaxed);
+///     }
+/// }
+///
+/// fn main() {
+///     // Start a thread to read control messages from the user
+///     std::thread::spawn(|| {
+///         let mut network_limit = START_REQUESTS;
+///         loop {
+///             println!("Press f to go faster or s to go slower");
+///             let mut input = String::new();
+///             std::io::stdin().read_line(&mut input).unwrap();
+///             match input.trim() {
+///                 "f" if network_limit < MAX_REQUESTS => {
+///                     HTTP_SEM.release(1);
+///                     network_limit += 1;
+///                 }
+///                 "s" if network_limit > 0 => {
+///                     HTTP_SEM.wait();
+///                     network_limit -= 1;
+///                 }
+///                 _ => eprintln!("Invalid request!"),
+///             }
+///         }
+///     });
+///
+///     // Start 8 worker threads and wait for them to exit
+///     std::thread::scope(|scope| {
+///         for _ in 0..4 {
+///             scope.spawn(do_work);
+///         }
+///     });
+/// }
+/// ```
 pub struct Semaphore {
     max: Count,
     count: AtomicCount,
@@ -23,6 +113,8 @@ enum Timeout {
 
 impl Semaphore
 {
+    /// Create a new [`Semaphore`] with a maximum available concurrency count of `max_count`
+    /// and an initial available concurrency count of `initial_count`.
     pub const fn new(initial_count: Count, max_count: Count) -> Self {
         #[allow(unused_comparisons)]
         if max_count < 0 {
@@ -140,16 +232,30 @@ impl Awaitable for Semaphore {
     type T = ();
     type Error = TimeoutError;
 
+    /// Attempts to obtain access to the resource or code protected by the `Semaphore`, subject to
+    /// the available concurrency count. Returns immediately if the `Semaphore`'s internal
+    /// concurrency count is non-zero or blocks sleeping until the `Semaphore` becomes available
+    /// (via another thread completing its access to the controlled-concurrency region or if the
+    /// semaphore's concurrency limit is raised).
+    ///
+    /// A successful wait against the semaphore decrements its internal available concurrency
+    /// count (possibly preventing other threads from obtaining the semaphore) until
+    /// [`Semaphore::release()`] is called.
     fn try_wait(&self) -> Result<(), Infallible> {
         self.try_wait(Timeout::Infinite).unwrap();
         Ok(())
     }
 
+    /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
+    /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
+    /// time limit elapses without the semaphore becoming available to the calling thread.
     fn try_wait_for(&self, limit: Duration) -> Result<(), rsevents::TimeoutError> {
         self.try_wait(Timeout::Bounded(limit))?;
         Ok(())
     }
 
+    /// Attempts to obtain the `Semaphore` without waiting, returning `Ok(())` if the semaphore
+    /// is immediately available or a [`TimeoutError`](rsevents::TimeoutError) otherwise.
     fn try_wait0(&self) -> Result<(), rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
         Ok(())
