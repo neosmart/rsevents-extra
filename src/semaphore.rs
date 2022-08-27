@@ -55,9 +55,9 @@ impl Semaphore
             debug_assert!(count <= self.max);
 
             count = if count == 0 {
-                eprintln!("Semaphore unavailable. Sleeping until the event is signalled.");
+                // eprintln!("Semaphore unavailable. Sleeping until the event is signalled.");
                 match timeout {
-                    Timeout::None => self.event.try_wait0()?,
+                    Timeout::None => return Err(TimeoutError),
                     Timeout::Infinite => self.event.try_wait()?,
                     Timeout::Bounded(timeout) => self.event.try_wait_for(timeout)?,
                 }
@@ -69,7 +69,7 @@ impl Semaphore
                     Ok(_) => {
                         // We obtained the semaphore.
                         let new_count = count - 1;
-                        eprintln!("Semaphore available. New count: {new_count}");
+                        // eprintln!("Semaphore available. New count: {new_count}");
                         if new_count > 0 {
                             self.event.set();
                         }
@@ -86,7 +86,7 @@ impl Semaphore
         }
         debug_assert!(count <= self.max);
 
-        Ok(())
+        return Ok(());
     }
 
     pub fn release(&self, count: Count) {
