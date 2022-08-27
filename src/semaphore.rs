@@ -89,15 +89,50 @@ impl Semaphore
         return Ok(());
     }
 
+    /// Attempts to increment the available concurrency by `count`, and panics if this
+    /// operation would result in a count that exceeds the `max_count` the `Semaphore` was
+    /// created with (see [`Semaphore::new()`]).
+    ///
+    /// See [`try_release`](Self::try_release) for a non-panicking version of this function.
     pub fn release(&self, count: Count) {
         let prev_count = self.count.fetch_add(count, Ordering::Relaxed);
-        // This is an overflow-safe version of the "prev_count + count > max"
-        if self.max - prev_count < count {
-            panic!("Semaphore::release() called with an inappropriate count!");
+        match prev_count.checked_add(count) {
+            Some(sum) if sum <= self.max => { },
+            _ => panic!("Semaphore::release() called with an inappropriate count!"),
         }
         if prev_count == 0 {
             self.event.set();
         }
+    }
+
+    /// Attempts to increment the available concurrency counter by `count`, and returns `false` if
+    /// this operation would result in a count that exceeds the `max_count` the `Semaphore` was
+    /// created with (see [`Semaphore::new()`]).
+    ///
+    /// If you can guarantee that the count cannot exceed the maximum allowed, you may want to use
+    /// [`Semaphore::release()`] instead as it is both lock-free and wait-free, whereas
+    /// `try_release()` is only lock-free and may spin internally in case of contention.
+    pub fn try_release(&self, count: Count) -> bool {
+        let mut prev_count = self.count.load(Ordering::Relaxed);
+        loop {
+            match prev_count.checked_add(count) {
+                Some(sum) if sum <= self.max => { },
+                _ => return false,
+            }
+            match self.count.compare_exchange_weak(prev_count, prev_count + count, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => break,
+                Err(new_count) => prev_count = new_count,
+            }
+        }
+
+        // We only need to set the AutoResetEvent if the count was previously exhausted.
+        // In all other cases, the last thread to obtain the semaphore would have already set the
+        // event (and auto-reset events saturate/clamp immediately).
+        if prev_count == 0 {
+            self.event.set();
+        }
+
+        return true;
     }
 }
 
