@@ -61,7 +61,7 @@ impl CountdownEvent {
     }
 }
 
-impl Awaitable for CountdownEvent {
+impl Awaitable<'_> for CountdownEvent {
     type T = ();
     type Error = TimeoutError;
 
