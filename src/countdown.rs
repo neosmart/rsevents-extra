@@ -3,11 +3,8 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-pub struct CountdownEvent {
-    count: AtomicUsize,
-    event: ManualResetEvent,
-}
-
+/// An `Awaitable` type that can be used to block until _n_ outstanding tasks have completed.
+///
 /// A countdown event is a special type of [`ManualResetEvent`] that makes it easy to wait for a
 /// given number of tasks to complete asynchronously, and then carry out some action. A countdown
 /// event is first initialized with a count equal to the number of outstanding tasks, and each time
@@ -17,6 +14,11 @@ pub struct CountdownEvent {
 ///
 /// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
 /// share across threads.
+pub struct CountdownEvent {
+    count: AtomicUsize,
+    event: ManualResetEvent,
+}
+
 impl CountdownEvent {
     /// Creates a new countdown event with the internal count initialized to `count`. If a count of
     /// zero is specified, the event is immediately set.
@@ -44,8 +46,7 @@ impl CountdownEvent {
     /// countdown event is immediately set.
     ///
     /// This requires a mutable reference to `self` to protect against attempting to reset a
-    /// countdown event that has extant threads already reporting their progress against it. Keep in
-    /// mind that calls to `reset()` can race with calls to `tick()`.
+    /// countdown event that has extant threads already reporting their progress against it.
     pub fn reset(&mut self, count: usize) {
         self.count.store(count, Ordering::Relaxed);
         if count == 0 {
