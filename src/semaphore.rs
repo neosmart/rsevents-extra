@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::convert::Infallible;
 use std::time::Duration;
@@ -24,7 +25,7 @@ type AtomicCount = AtomicU32;
 /// ## Example:
 ///
 /// ```no_run
-/// use rsevents_extra::{Awaitable, Semaphore};
+/// use rsevents_extra::{Semaphore};
 /// use std::sync::atomic::{AtomicU32, Ordering};
 ///
 /// // Limit maximum number of simultaneous network requests to 4, but start
@@ -35,20 +36,15 @@ type AtomicCount = AtomicU32;
 /// static TASKS_LEFT: AtomicU32 = AtomicU32::new(42);
 ///
 /// fn download_file(url: &str) -> Result<Vec<u8>, std::io::Error> {
-///     fn inner_download_file(url: &str) -> Result<Vec<u8>, std::io::Error> {
-///         todo!();
-///     }
-///
 ///     // Make sure we never exceed the maximum number of simultaneous
 ///     // network connections allowed.
-///     HTTP_SEM.wait();
-///     // Now we can access the network guaranteeing that the HTTP_SEM concurrency
-///     // limit is respected.
-///     let result = inner_download_file(url);
-///     // Make sure we give up our network access slot to let another thread in.
-///     HTTP_SEM.release(1);
+///     let sem_guard = HTTP_SEM.wait();
 ///
-///     return result;
+///     // <download the file here>
+///
+///     // When `sem_guard` is dropped at the end of the scope, we give up our
+///     // network access slot letting another thread through.
+///     return Ok(unimplemented!());
 /// }
 ///
 /// fn get_file_from_cache(url: &str) -> Result<Vec<u8>, ()> { todo!() }
@@ -80,7 +76,8 @@ type AtomicCount = AtomicU32;
 ///                     network_limit += 1;
 ///                 }
 ///                 "s" if network_limit > 0 => {
-///                     HTTP_SEM.wait();
+///                     let slot = HTTP_SEM.wait();
+///                     std::mem::forget(slot);
 ///                     network_limit -= 1;
 ///                 }
 ///                 _ => eprintln!("Invalid request!"),
@@ -88,9 +85,9 @@ type AtomicCount = AtomicU32;
 ///         }
 ///     });
 ///
-///     // Start 8 worker threads and wait for them to exit
+///     // Start 8 worker threads and wait for them to finish
 ///     std::thread::scope(|scope| {
-///         for _ in 0..4 {
+///         for _ in 0..8 {
 ///             scope.spawn(do_work);
 ///         }
 ///     });
@@ -131,7 +128,6 @@ impl Semaphore
         Semaphore {
             max: max_count,
             count: AtomicCount::new(initial_count as Count),
-            // The event is always unset unless there's contention around the max value
             event: AutoResetEvent::new(EventState::Unset),
         }
     }
@@ -181,9 +177,40 @@ impl Semaphore
         return Ok(());
     }
 
-    /// Attempts to increment the available concurrency by `count`, and panics if this
-    /// operation would result in a count that exceeds the `max_count` the `Semaphore` was
-    /// created with (see [`Semaphore::new()`]).
+    /// Attempts to obtain access to the resource or code protected by the `Semaphore`, subject to
+    /// the available concurrency count. Returns immediately if the `Semaphore`'s internal
+    /// concurrency count is non-zero or blocks sleeping until the `Semaphore` becomes available
+    /// (via another thread completing its access to the controlled-concurrency region or if the
+    /// semaphore's concurrency limit is raised).
+    ///
+    /// A successful wait against the semaphore decrements its internal available concurrency
+    /// count (possibly preventing other threads from obtaining the semaphore) until
+    /// [`Semaphore::release()`] is called (which happens automatically when the `SemaphoreGuard` is
+    /// dropped).
+    pub fn wait<'a>(&'a self) -> SemaphoreGuard<'a> {
+        self.try_wait(Timeout::Infinite).unwrap();
+        SemaphoreGuard { semaphore: &self }
+    }
+
+    #[allow(unused)]
+    fn wait0<'a>(&'a self) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+        self.try_wait(Timeout::None)?;
+        Ok(SemaphoreGuard { semaphore: &self })
+    }
+
+    /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
+    /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
+    /// time limit elapses without the semaphore becoming available to the calling thread.
+    pub fn wait_for<'a>(&'a self, limit: Duration) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+        match limit {
+            Duration::ZERO => self.try_wait(Timeout::None)?,
+            timeout => self.try_wait(Timeout::Bounded(timeout))?,
+        };
+        Ok(SemaphoreGuard { semaphore: &self })
+    }
+
+    /// Increments the available concurrency by `count`, and panics if this results in a count that
+    /// exceeds the `max_count` the `Semaphore` was created with (see [`Semaphore::new()`]).
     ///
     /// See [`try_release`](Self::try_release) for a non-panicking version of this function.
     pub fn release(&self, count: Count) {
@@ -228,8 +255,8 @@ impl Semaphore
     }
 }
 
-impl Awaitable for Semaphore {
-    type T = ();
+impl<'a> Awaitable<'a> for Semaphore {
+    type T = SemaphoreGuard<'a>;
     type Error = TimeoutError;
 
     /// Attempts to obtain access to the resource or code protected by the `Semaphore`, subject to
@@ -241,24 +268,40 @@ impl Awaitable for Semaphore {
     /// A successful wait against the semaphore decrements its internal available concurrency
     /// count (possibly preventing other threads from obtaining the semaphore) until
     /// [`Semaphore::release()`] is called.
-    fn try_wait(&self) -> Result<(), Infallible> {
+    fn try_wait(&'a self) -> Result<SemaphoreGuard<'a>, Infallible> {
         self.try_wait(Timeout::Infinite).unwrap();
-        Ok(())
+        Ok(SemaphoreGuard { semaphore: &self })
     }
 
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
     /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
     /// time limit elapses without the semaphore becoming available to the calling thread.
-    fn try_wait_for(&self, limit: Duration) -> Result<(), rsevents::TimeoutError> {
+    fn try_wait_for(&'a self, limit: Duration) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::Bounded(limit))?;
-        Ok(())
+        Ok(SemaphoreGuard { semaphore: &self })
     }
 
     /// Attempts to obtain the `Semaphore` without waiting, returning `Ok(())` if the semaphore
     /// is immediately available or a [`TimeoutError`](rsevents::TimeoutError) otherwise.
-    fn try_wait0(&self) -> Result<(), rsevents::TimeoutError> {
+    fn try_wait0(&'a self) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
-        Ok(())
+        Ok(SemaphoreGuard { semaphore: &self })
+    }
+}
+
+pub struct SemaphoreGuard<'a> {
+    semaphore: &'a Semaphore,
+}
+
+impl Debug for SemaphoreGuard<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SemaphoreGuard").finish_non_exhaustive()
+    }
+}
+
+impl Drop for SemaphoreGuard<'_> {
+    fn drop(&mut self) {
+        self.semaphore.release(1);
     }
 }
 
@@ -273,25 +316,27 @@ mod test {
     #[test]
     fn uncontested_semaphore() {
         let sem = Semaphore::new(1, 1);
-        assert_eq!(true, sem.wait0());
-        assert_eq!(false, sem.wait0());
+        let _1 = sem.wait0().unwrap();
+        sem.try_wait0().unwrap_err();
     }
 
     #[test]
     fn zero_semaphore() {
         let sem = Semaphore::new(0, 0);
-        assert_eq!(false, sem.wait0());
+        sem.try_wait0().unwrap_err();
     }
 
-    fn release_x_of_y_sequentially(x: Count, y: Count) {
+    fn release_x_of_y_sequentially(x: Count, y: Count) -> Semaphore {
         let sem: Semaphore = Semaphore::new(0, y);
 
-        // use thread::scope because it automatically joins all threads
+        // Use thread::scope because it automatically joins all threads,
+        // which is useful if they panic.
         thread::scope(|scope| {
             for _ in 0..x {
                 scope.spawn(|| {
-                    assert_eq!(false, sem.wait0());
-                    assert_eq!(true, sem.wait_for(Duration::from_secs(1)));
+                    sem.wait0().unwrap_err();
+                    let lock = sem.wait_for(Duration::from_secs(1)).unwrap();
+                    core::mem::forget(lock);
                 });
             }
 
@@ -301,18 +346,22 @@ mod test {
                     sem.release(1);
                 }
             });
-        })
+        });
+
+        sem
     }
 
-    fn release_x_of_y(x: Count, y: Count) {
+    fn release_x_of_y(x: Count, y: Count) -> Semaphore {
         let sem: Semaphore = Semaphore::new(0, y);
 
-        // use thread::scope because it automatically joins all threads
+        // Use thread::scope because it automatically joins all threads,
+        // which is useful if they panic.
         thread::scope(|scope| {
             for _ in 0..x {
                 scope.spawn(|| {
-                    assert_eq!(false, sem.wait0());
-                    assert_eq!(true, sem.wait_for(Duration::from_secs(1)));
+                    sem.wait0().unwrap_err();
+                    let lock = sem.wait_for(Duration::from_secs(1)).unwrap();
+                    std::mem::forget(lock);
                 });
             }
 
@@ -320,7 +369,9 @@ mod test {
                 std::thread::sleep(Duration::from_millis(100));
                 sem.release(x);
             });
-        })
+        });
+
+        sem
     }
 
     #[test]
