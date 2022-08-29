@@ -76,8 +76,7 @@ type AtomicCount = AtomicU32;
 ///                     network_limit += 1;
 ///                 }
 ///                 "s" if network_limit > 0 => {
-///                     let slot = HTTP_SEM.wait();
-///                     std::mem::forget(slot);
+///                     HTTP_SEM.wait().forget();
 ///                     network_limit -= 1;
 ///                 }
 ///                 _ => eprintln!("Invalid request!"),
@@ -94,8 +93,21 @@ type AtomicCount = AtomicU32;
 /// }
 /// ```
 pub struct Semaphore {
+    /// The maximum available concurrency for this semaphore, set at the time of initialization and
+    /// static thereafter.
     max: Count,
+    /// The current available concurrency for this semaphore, `> 0 && <= max`. This is like
+    /// `current` but it also includes "currently borrowed" semaphore instances. The only reason for
+    /// this field to exist is so that a truly safe `Semaphore::try_release()` method can exist (one
+    /// that can guarantee not only that the new `count` won't exceed `max`, but also that the
+    /// release operation will never cause `count` to exceed `max` even after all borrowed semaphore
+    /// slots are returned.
+    current: AtomicCount,
+    /// The currently available concurrency count, equal to `current` minus any borrowed/obtained
+    /// semaphore slots.
     count: AtomicCount,
+    /// The auto-reset event used to sleep awaiting threads until a zero concurrency count is
+    /// incremented, waking only one awaiter at a time.
     event: AutoResetEvent,
 }
 
@@ -127,6 +139,7 @@ impl Semaphore
 
         Semaphore {
             max: max_count,
+            current: AtomicCount::new(initial_count),
             count: AtomicCount::new(initial_count as Count),
             event: AutoResetEvent::new(EventState::Unset),
         }
@@ -185,8 +198,8 @@ impl Semaphore
     ///
     /// A successful wait against the semaphore decrements its internal available concurrency
     /// count (possibly preventing other threads from obtaining the semaphore) until
-    /// [`Semaphore::release()`] is called (which happens automatically when the `SemaphoreGuard` is
-    /// dropped).
+    /// [`Semaphore::release()`] is called (which happens automatically when the `SemaphoreGuard`
+    /// concurrency token is dropped).
     pub fn wait<'a>(&'a self) -> SemaphoreGuard<'a> {
         self.try_wait(Timeout::Infinite).unwrap();
         SemaphoreGuard { semaphore: &self }
@@ -209,19 +222,126 @@ impl Semaphore
         Ok(SemaphoreGuard { semaphore: &self })
     }
 
+    #[inline]
+    /// Directly increments the available concurrency count by `count`, without checking if this
+    /// would violate the maximum available concurrency count.
+    unsafe fn release_internal(&self, count: Count) {
+        let prev_count = self.count.fetch_add(count, Ordering::Relaxed);
+
+        // We only need to set the AutoResetEvent if the count was previously exhausted.
+        // In all other cases, the last thread to obtain the semaphore would have already set the
+        // event (and auto-reset events saturate/clamp immediately).
+        if prev_count == 0 {
+            self.event.set();
+        }
+    }
+
+    #[doc(hidden)]
+    /// Directly modifies the maximum currently available concurrency `current`, without regard for
+    /// overflow or a violation of the semaphore's maximum allowed count.
+    pub unsafe fn modify_current(&self, count: i32) {
+        match count.signum() {
+            0 => return,
+            1 => self.current.fetch_add(count as u32, Ordering::Relaxed),
+            -1 => self.current.fetch_sub((count as i64).abs() as u32, Ordering::Relaxed),
+            _ => unsafe { core::hint::unreachable_unchecked() },
+        };
+    }
+
+    /// Directly increments or decrements the current availability limit for a `Semaphore` without
+    /// blocking. This is only possible when the semaphore is not currently borrowed or being waited
+    /// on. Panics if the change will result in an available concurrency limit of less than zero or
+    /// greater than the semaphore's maximum. See [`Semaphore::try_modify()`] for a non-panicking
+    /// alternative.
+    ///
+    /// To increment the semaphore's concurrency limit without an `&mut Semaphore` reference, call
+    /// [`Semaphore::release()`] instead. To decrement the concurrency limit, wait on the semaphore
+    /// then call [`forget()`](SemaphoreGuard::forget) on the returned `SemaphoreGuard`:
+    ///
+    /// ```rust
+    /// use rsevents_extra::Semaphore;
+    ///
+    /// fn adjust_sem(sem: &Semaphore, count: i32) {
+    ///     if count >= 0 {
+    ///        sem.release(count as u32);
+    ///     } else {
+    ///         // Note: this will block if the semaphore isn't available!
+    ///         for _ in 0..(-1 * count) {
+    ///             let guard = sem.wait();
+    ///             guard.forget();
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn modify(&mut self, count: i32) {
+        let current = self.current.load(Ordering::Relaxed);
+        match (current as i64).checked_add(count as i64) {
+            Some(sum) if sum <= (self.max as i64) => {},
+            _ => panic!("An invalid count was supplied to Semaphore::modify()"),
+        };
+
+        match count.signum() {
+            0 => return,
+            1 => {
+                self.current.fetch_add(count as u32, Ordering::Relaxed);
+                self.count.fetch_add(count as u32, Ordering::Relaxed);
+            },
+            -1 => {
+                self.current.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+                self.count.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+            }
+            _ => unsafe { core::hint::unreachable_unchecked(); },
+        }
+    }
+
+    /// Directly increments or decrements the current availability limit for a `Semaphore` without
+    /// blocking. This is only possible when the semaphore is not currently borrowed or being waited
+    /// on. Returns `false` if the change will result in an available concurrency limit of less
+    /// than zero or greater than the semaphore's maximum.
+    ///
+    /// See [`Semaphore::modify()`] for more info.
+    pub fn try_modify(&mut self, count: i32) -> bool {
+        let current = self.current.load(Ordering::Relaxed);
+        match (current as i64).checked_add(count as i64) {
+            Some(sum) if sum <= (self.max as i64) => {},
+            _ => return false,
+        };
+
+        match count.signum() {
+            0 => return true,
+            1 => {
+                self.current.fetch_add(count as u32, Ordering::Relaxed);
+                self.count.fetch_add(count as u32, Ordering::Relaxed);
+            },
+            -1 => {
+                self.current.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+                self.count.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+            }
+            _ => unsafe { core::hint::unreachable_unchecked(); },
+        };
+
+        return true;
+    }
+
     /// Increments the available concurrency by `count`, and panics if this results in a count that
-    /// exceeds the `max_count` the `Semaphore` was created with (see [`Semaphore::new()`]).
+    /// exceeds the `max_count` the `Semaphore` was created with (see [`Semaphore::new()`]). Unlike
+    /// [`Semaphore::modify()`], this can be called with a non-mutable reference to the semaphore,
+    /// but can only increment the concurrency level.
     ///
     /// See [`try_release`](Self::try_release) for a non-panicking version of this function.
+    /// See the documentation for [`modify()`](Self::modify) for info on decrementing the available
+    /// concurrency level.
     pub fn release(&self, count: Count) {
-        let prev_count = self.count.fetch_add(count, Ordering::Relaxed);
+        // Increment the "current maximum" which includes borrowed semaphore instances.
+        let prev_count = self.current.fetch_add(count, Ordering::Relaxed);
         match prev_count.checked_add(count) {
             Some(sum) if sum <= self.max => { },
             _ => panic!("Semaphore::release() called with an inappropriate count!"),
         }
-        if prev_count == 0 {
-            self.event.set();
-        }
+        // Increment the actual "currently available" count to match. The two fields do not need to
+        // be updated atomically because we only care that the previous operation succeeded, but do
+        // not need to modify this variable contingent on that one.
+        unsafe { self.release_internal(count); }
     }
 
     /// Attempts to increment the available concurrency counter by `count`, and returns `false` if
@@ -232,24 +352,23 @@ impl Semaphore
     /// [`Semaphore::release()`] instead as it is both lock-free and wait-free, whereas
     /// `try_release()` is only lock-free and may spin internally in case of contention.
     pub fn try_release(&self, count: Count) -> bool {
-        let mut prev_count = self.count.load(Ordering::Relaxed);
+        // Try to increment the "current maximum" which includes borrowed semaphore instances.
+        let mut prev_count = self.current.load(Ordering::Relaxed);
         loop {
             match prev_count.checked_add(count) {
                 Some(sum) if sum <= self.max => { },
                 _ => return false,
             }
-            match self.count.compare_exchange_weak(prev_count, prev_count + count, Ordering::Relaxed, Ordering::Relaxed) {
+            match self.current.compare_exchange_weak(prev_count, prev_count + count, Ordering::Relaxed, Ordering::Relaxed) {
                 Ok(_) => break,
                 Err(new_count) => prev_count = new_count,
             }
         }
 
-        // We only need to set the AutoResetEvent if the count was previously exhausted.
-        // In all other cases, the last thread to obtain the semaphore would have already set the
-        // event (and auto-reset events saturate/clamp immediately).
-        if prev_count == 0 {
-            self.event.set();
-        }
+        // Increment the actual "currently available" count to match. The two fields do not need to
+        // be updated atomically because we only care that the previous operation succeeded, but do
+        // not need to modify this variable contingent on that one.
+        unsafe { self.release_internal(count); }
 
         return true;
     }
@@ -289,8 +408,24 @@ impl<'a> Awaitable<'a> for Semaphore {
     }
 }
 
+/// A type returned by [`Semaphore::wait()`] calls that automatically returns the borrowed
+/// concurrency token from the `Semaphore` when dropped, allowing another thread to enter the
+/// semaphore in its place.
 pub struct SemaphoreGuard<'a> {
     semaphore: &'a Semaphore,
+}
+
+impl SemaphoreGuard<'_> {
+    /// Safely "forgets" a semaphore's guard, taking care to decrement the semaphore's
+    /// availablibility counter to make sure that future calls to `Semaphore::release()` or
+    /// `Semaphore::try_release()` do not incorrectly report failure.
+    ///
+    /// A `SemaphoreGuard` instance should never be passed to `std::mem::forget()` directly, as that
+    /// would violate the internal contract; this method should be used instead.
+    pub fn forget(self) {
+        unsafe { self.semaphore.modify_current(-1); }
+        core::mem::forget(self);
+    }
 }
 
 impl Debug for SemaphoreGuard<'_> {
@@ -301,7 +436,7 @@ impl Debug for SemaphoreGuard<'_> {
 
 impl Drop for SemaphoreGuard<'_> {
     fn drop(&mut self) {
-        self.semaphore.release(1);
+        unsafe { self.semaphore.release_internal(1); }
     }
 }
 
@@ -336,7 +471,9 @@ mod test {
                 scope.spawn(|| {
                     sem.wait0().unwrap_err();
                     let lock = sem.wait_for(Duration::from_secs(1)).unwrap();
-                    core::mem::forget(lock);
+                    // Correct way to "forget" a semaphore slot; never pass a
+                    // SemaphoreGuard to std::mem::forget()!
+                    lock.forget();
                 });
             }
 
