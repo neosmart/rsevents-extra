@@ -13,4 +13,4 @@ categories = ["concurrency", "asynchronous"]
 license = "MIT"
 
 [dependencies]
-rsevents = "0.3"
+rsevents = { version = "0.3.1" }
