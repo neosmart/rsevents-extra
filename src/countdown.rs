@@ -1,6 +1,6 @@
 use rsevents::{Awaitable, ManualResetEvent, EventState, TimeoutError};
-use std::convert::Infallible;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::convert::{Infallible, TryInto};
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
 
 /// An `Awaitable` type that can be used to block until _n_ parallel tasks have completed.
@@ -57,7 +57,11 @@ use std::time::Duration;
 /// }
 /// ```
 pub struct CountdownEvent {
-    count: AtomicUsize,
+    /// The internal count tracking the number of events left. While we could use an unsigned type
+    /// and just wrap on under/overflow and that would be fine (since we only set the event in
+    /// response to a `tick()` call and never reset it), it means calls to `CountdownEvent::count()`
+    /// would report the overflow and we couldn't intercept it.
+    count: AtomicIsize,
     event: ManualResetEvent,
 }
 
@@ -65,8 +69,14 @@ impl CountdownEvent {
     /// Creates a new countdown event with the internal count initialized to `count`. If a count of
     /// zero is specified, the event is immediately set.
     pub const fn new(count: usize) -> Self {
+        const MAX: usize = isize::MAX as usize;
+        let count: isize = match count {
+            0..=MAX => count as isize,
+            _ => panic!("count cannot exceeed isize::MAX"),
+        };
+
         let result = Self {
-            count: AtomicUsize::new(count),
+            count: AtomicIsize::new(count),
             event: ManualResetEvent::new(if count == 0 { EventState::Set } else { EventState::Unset }),
         };
 
@@ -91,6 +101,11 @@ impl CountdownEvent {
     /// may race with calls to [`tick`](Self::tick) from any still-running threads with a reference
     /// to the countdown event!
     pub fn reset(&self, count: usize) {
+        let count: isize = match count.try_into() {
+            Ok(count) => count,
+            Err(_) => panic!("count cannot exceeed isize::MAX"),
+        };
+
         self.count.store(count, Ordering::Relaxed);
         if count == 0 {
             self.event.set();
@@ -99,9 +114,13 @@ impl CountdownEvent {
         }
     }
 
-    /// Get the current internal countdown value.
+    /// Get the current internal countdown value, saturated at zero in case [`tick()`](Self::tick)
+    /// is called beyond the original count.
     pub fn count(&self) -> usize {
-        self.count.load(Ordering::Relaxed)
+        match self.count.load(Ordering::Relaxed) {
+            count @ 0.. => count as usize,
+            _ => 0,
+        }
     }
 }
 
@@ -174,4 +193,16 @@ fn threaded_countdown() {
     // To catch any panics
     thread1.join().unwrap();
     thread2.join().unwrap();
+}
+
+#[test]
+fn negative_countdown() {
+    let countdown = CountdownEvent::new(1);
+    assert_eq!(false, countdown.wait0());
+    countdown.tick();
+    assert_eq!(countdown.count(), 0);
+    assert_eq!(true, countdown.wait0());
+    countdown.tick();
+    assert_eq!(countdown.count(), 0);
+    assert_eq!(true, countdown.wait0());
 }
