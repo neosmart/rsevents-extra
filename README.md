@@ -3,7 +3,7 @@
 [![crates.io](https://img.shields.io/crates/v/rsevents-extra.svg)](https://crates.io/crates/rsevents-extra)
 [![docs.rs](https://docs.rs/rsevents-extra/badge.svg)](https://docs.rs/rsevents-extra/latest/rsevents_extra)
 
-`rsevents-extra` is a utility crate with a number of useful synchronization "primitives" built on top of (and therefore, at a higher level then) [`rsevents`](https://github.com/neosmart/rsevents/).
+`rsevents-extra` is a utility crate with a number of useful synchronization "primitives" built on top of (and therefore, at a higher level than) [`rsevents`](https://github.com/neosmart/rsevents/).
 `rsevents-extra` is a community project, feel free to contribute additional synchronization objects to this crate!
 
 ## About `rsevents`
