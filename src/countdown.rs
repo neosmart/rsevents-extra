@@ -8,9 +8,8 @@ use std::time::Duration;
 /// A countdown event is a special type of [`ManualResetEvent`] that makes it easy to wait for a
 /// given number of tasks to complete asynchronously, and then carry out some action. A countdown
 /// event is first initialized with a count equal to the number of outstanding tasks, and each time
-/// a task is completed, [`CountdownEvent::tick()`] is called. A call to
-/// [`CountdownEvent::wait()`](Awaitable::wait()) will block until all outstanding tasks have
-/// completed and the internal counter reaches 0.
+/// a task is completed, [`CountdownEvent::tick()`] is called. A call to [`CountdownEvent::wait()`]
+/// will block until all outstanding tasks have completed and the internal counter reaches 0.
 ///
 /// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
 /// share across threads.
@@ -45,9 +44,10 @@ impl CountdownEvent {
     /// Resets a countdown event to the specified `count`. If a count of zero is specified, the
     /// countdown event is immediately set.
     ///
-    /// This requires a mutable reference to `self` to protect against attempting to reset a
-    /// countdown event that has extant threads already reporting their progress against it.
-    pub fn reset(&mut self, count: usize) {
+    /// Beware that unless you have a mutable reference to the countdown event, calls to `reset()`
+    /// may race with calls to [`tick`](Self::tick) from any still-running threads with a reference
+    /// to the countdown event!
+    pub fn reset(&self, count: usize) {
         self.count.store(count, Ordering::Relaxed);
         if count == 0 {
             self.event.set();
@@ -94,7 +94,7 @@ fn basic_countdown() {
 
 #[test]
 fn reset_countdown() {
-    let mut countdown = CountdownEvent::new(1);
+    let countdown = CountdownEvent::new(1);
     assert_eq!(countdown.wait0(), false);
     countdown.tick();
     assert_eq!(countdown.wait0(), true);
