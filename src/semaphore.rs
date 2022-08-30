@@ -1,13 +1,13 @@
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::convert::Infallible;
 use std::time::Duration;
 use rsevents::{Awaitable, EventState, AutoResetEvent, TimeoutError};
 
-type Count = u32;
-type AtomicCount = AtomicU32;
-type ICount = i32;
-type INext = i64;
+type Count = u16;
+type AtomicCount = AtomicU16;
+type ICount = i16;
+type INext = i32;
 
 /// A concurrency-limiting synchronization primitive, used to limit the number of threads
 /// performing a certain operation or accessing a particular resource at the same time.
@@ -32,8 +32,8 @@ type INext = i64;
 ///
 /// // Limit maximum number of simultaneous network requests to 4, but start
 /// // with only 1 simultaneous network request allowed.
-/// const MAX_REQUESTS: u32 = 4;
-/// const START_REQUESTS: u32 = 1;
+/// const MAX_REQUESTS: u16 = 4;
+/// const START_REQUESTS: u16 = 1;
 /// static HTTP_SEM: Semaphore = Semaphore::new(START_REQUESTS, MAX_REQUESTS);
 /// static TASKS_LEFT: AtomicU32 = AtomicU32::new(42);
 ///
@@ -263,9 +263,9 @@ impl Semaphore
     /// ```rust
     /// use rsevents_extra::Semaphore;
     ///
-    /// fn adjust_sem(sem: &Semaphore, count: i32) {
+    /// fn adjust_sem(sem: &Semaphore, count: i16) {
     ///     if count >= 0 {
-    ///        sem.release(count as u32);
+    ///        sem.release(count as u16);
     ///     } else {
     ///         // Note: this will block if the semaphore isn't available!
     ///         for _ in 0..(-1 * count) {
