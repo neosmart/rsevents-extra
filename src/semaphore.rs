@@ -530,6 +530,7 @@ mod test {
 
     #[test]
     fn release_2_of_2() {
-        release_x_of_y_sequentially(2, 2);
+        let sem = release_x_of_y_sequentially(2, 2);
+        sem.wait0().unwrap_err();
     }
 }
