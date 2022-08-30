@@ -20,7 +20,7 @@ use std::time::Duration;
 /// use rsevents_extra::{Awaitable, CountdownEvent};
 ///
 /// // CountdownEvent::new() is const and can be used directly in a static
-/// // static context without needing lazy_static or once_cell:
+/// // context without needing lazy_static or once_cell:
 /// static ALMOST_DONE: CountdownEvent = CountdownEvent::new(0);
 ///
 /// fn worker_thread() {
@@ -68,6 +68,9 @@ pub struct CountdownEvent {
 impl CountdownEvent {
     /// Creates a new countdown event with the internal count initialized to `count`. If a count of
     /// zero is specified, the event is immediately set.
+    ///
+    /// This is a `const` function and can be used in a `static` context, (e.g. to declare a shared,
+    /// static variable without using lazy_static or once_cell).
     pub const fn new(count: usize) -> Self {
         const MAX: usize = isize::MAX as usize;
         let count: isize = match count {
@@ -87,6 +90,9 @@ impl CountdownEvent {
     /// event enters a [set](EventState::Set) state and any outstanding or future calls to
     /// [`CountdownEvent::wait()`] will be let through without blocking (until [the event is
     /// reset](CountdownEvent::reset())).
+    ///
+    /// It is safe to call this more times than the countdown event was initialized or reset to, in
+    /// which case [the reported count](Self::count()) will saturate at zero.
     pub fn tick(&self) {
         let old_ticks = self.count.fetch_sub(1, Ordering::Relaxed);
         if old_ticks == 1 {
@@ -98,8 +104,8 @@ impl CountdownEvent {
     /// countdown event is immediately set.
     ///
     /// Beware that unless you have a mutable reference to the countdown event, calls to `reset()`
-    /// may race with calls to [`tick`](Self::tick) from any still-running threads with a reference
-    /// to the countdown event!
+    /// may race with calls to [`tick()`](Self::tick) from any still-running threads with a
+    /// reference to the countdown event!
     pub fn reset(&self, count: usize) {
         let count: isize = match count.try_into() {
             Ok(count) => count,
