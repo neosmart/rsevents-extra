@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// An `Awaitable` type that can be used to block until _n_ outstanding tasks have completed.
+/// An `Awaitable` type that can be used to block until _n_ parallel tasks have completed.
 ///
 /// A countdown event is a special type of [`ManualResetEvent`] that makes it easy to wait for a
 /// given number of tasks to complete asynchronously, and then carry out some action. A countdown
@@ -13,6 +13,50 @@ use std::time::Duration;
 ///
 /// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
 /// share across threads.
+///
+/// ## Example:
+///
+/// ```rust
+/// use rsevents_extra::{Awaitable, CountdownEvent};
+///
+/// // CountdownEvent::new() is const and can be used directly in a static
+/// // static context without needing lazy_static or once_cell:
+/// static ALMOST_DONE: CountdownEvent = CountdownEvent::new(0);
+///
+/// fn worker_thread() {
+///     for _ in 0..250 {
+///         // Do something really important
+///         // ...
+///
+///         // Each time we've finished a task, report our progress against
+///         // the countdown event.
+///         // Note that it's OK to keep calling this after the countdown
+///         // event has already fired.
+///         ALMOST_DONE.tick();
+///     }
+/// }
+///
+/// fn main() {
+///     // Re-init the countdown event to fire after the first 750 tasks have
+///     // been completed.
+///     ALMOST_DONE.reset(750);
+///
+///     // Start 4 threads to begin work in parallel
+///     std::thread::scope(|scope| {
+///         for _ in 0..4 {
+///             scope.spawn(worker_thread);
+///         }
+///
+///         // Wait for the 750 tasks to be finished. This gives us more
+///         // freedom than blocking until all threads have exited (as they may
+///         // be long-lived and service many different tasks of different
+///         // types, each of which we could track separately.)
+///         ALMOST_DONE.wait();
+///
+///         eprintln!("Worker threads have almost finished! Hang tight!");
+///     });
+/// }
+/// ```
 pub struct CountdownEvent {
     count: AtomicUsize,
     event: ManualResetEvent,
