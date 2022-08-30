@@ -4,6 +4,11 @@ mod semaphore;
 pub use self::countdown::CountdownEvent;
 pub use self::semaphore::{Semaphore, SemaphoreGuard};
 
-/// Re-export [`rsevents::Awaitable`] so consumers of this crate do not need to add an explicit
-/// dependency on `rsevents` just to wait on one of our events.
+/// The `rsevents` abstraction over all types that can be awaited, implemented by types in this
+/// crate.
+///
 pub use rsevents::Awaitable;
+/// The default `rsevents` error for `Awaitable` implementations in this crate, indicating that
+/// unbounded calls to [`Awaitable::wait()`] cannot fail.
+///
+pub use rsevents::TimeoutError;
