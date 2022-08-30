@@ -410,15 +410,20 @@ impl<'a> Awaitable<'a> for Semaphore {
     }
 }
 
-/// A type returned by [`Semaphore::wait()`] calls that automatically returns the borrowed
-/// concurrency token from the `Semaphore` when dropped, allowing another thread to enter the
-/// semaphore in its place.
+/// The concurrency token returned by [`Semaphore::wait()`], allowing access to the
+/// concurrency-limited region/code. Gives up its slot when dropped, allowing another thread to
+/// enter the semaphore in its place.
+///
+/// `SemaphoreGuard` instances should never be passed to `std::mem::forget()` &ndash;
+/// [`SemaphoreGuard::forget()`] should be called instead to forget a `SemaphoreGuard` and
+/// permanently decrease the available concurrency.
 pub struct SemaphoreGuard<'a> {
     semaphore: &'a Semaphore,
 }
 
 impl SemaphoreGuard<'_> {
-    /// Safely "forgets" a semaphore's guard, taking care to decrement the semaphore's
+    /// Safely "forgets" a semaphore's guard, permanently reducing the concurrency limit of the
+    /// associated `Semaphore`. `SemaphoreGuard::forget()` internally decrements the semaphore's
     /// availablibility counter to make sure that future calls to `Semaphore::release()` or
     /// `Semaphore::try_release()` do not incorrectly report failure.
     ///

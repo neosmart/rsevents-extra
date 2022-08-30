@@ -11,8 +11,8 @@ use std::time::Duration;
 /// a task is completed, [`CountdownEvent::tick()`] is called. A call to [`CountdownEvent::wait()`]
 /// will block until all outstanding tasks have completed and the internal counter reaches 0.
 ///
-/// Countdown events are thread-safe and may be wrapped in an [`Arc`](std::sync::Arc) to easily
-/// share across threads.
+/// Countdown events are thread-safe and may be declared as static variables or wrapped in an
+/// [`Arc`](std::sync::Arc) to easily share across threads.
 ///
 /// ## Example:
 ///
@@ -25,8 +25,7 @@ use std::time::Duration;
 ///
 /// fn worker_thread() {
 ///     for _ in 0..250 {
-///         // Do something really important
-///         // ...
+///         // <Do something really important...>
 ///
 ///         // Each time we've finished a task, report our progress against
 ///         // the countdown event.
@@ -76,7 +75,7 @@ impl CountdownEvent {
 
     /// Decrements the internal countdown. When the internal countdown reaches zero, the countdown
     /// event enters a [set](EventState::Set) state and any outstanding or future calls to
-    /// [`Awaitable::wait()`] will be let through without blocking (until [the event is
+    /// [`CountdownEvent::wait()`] will be let through without blocking (until [the event is
     /// reset](CountdownEvent::reset())).
     pub fn tick(&self) {
         let old_ticks = self.count.fetch_sub(1, Ordering::Relaxed);
