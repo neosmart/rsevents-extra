@@ -6,6 +6,8 @@ use rsevents::{Awaitable, EventState, AutoResetEvent, TimeoutError};
 
 type Count = u32;
 type AtomicCount = AtomicU32;
+type ICount = i32;
+type INext = i64;
 
 /// A concurrency-limiting synchronization primitive, used to limit the number of threads
 /// performing a certain operation or accessing a particular resource at the same time.
@@ -239,11 +241,11 @@ impl Semaphore
     #[doc(hidden)]
     /// Directly modifies the maximum currently available concurrency `current`, without regard for
     /// overflow or a violation of the semaphore's maximum allowed count.
-    pub unsafe fn modify_current(&self, count: i32) {
+    pub unsafe fn modify_current(&self, count: ICount) {
         match count.signum() {
             0 => return,
-            1 => self.current.fetch_add(count as u32, Ordering::Relaxed),
-            -1 => self.current.fetch_sub((count as i64).abs() as u32, Ordering::Relaxed),
+            1 => self.current.fetch_add(count as Count, Ordering::Relaxed),
+            -1 => self.current.fetch_sub((count as INext).abs() as Count, Ordering::Relaxed),
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
     }
@@ -273,22 +275,22 @@ impl Semaphore
     ///     }
     /// }
     /// ```
-    pub fn modify(&mut self, count: i32) {
+    pub fn modify(&mut self, count: ICount) {
         let current = self.current.load(Ordering::Relaxed);
-        match (current as i64).checked_add(count as i64) {
-            Some(sum) if sum <= (self.max as i64) => {},
+        match (current as INext).checked_add(count as INext) {
+            Some(sum) if sum <= (self.max as INext) => {},
             _ => panic!("An invalid count was supplied to Semaphore::modify()"),
         };
 
         match count.signum() {
             0 => return,
             1 => {
-                self.current.fetch_add(count as u32, Ordering::Relaxed);
-                self.count.fetch_add(count as u32, Ordering::Relaxed);
+                self.current.fetch_add(count as Count, Ordering::Relaxed);
+                self.count.fetch_add(count as Count, Ordering::Relaxed);
             },
             -1 => {
-                self.current.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
-                self.count.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+                self.current.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                self.count.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
             }
             _ => unsafe { core::hint::unreachable_unchecked(); },
         }
@@ -300,22 +302,22 @@ impl Semaphore
     /// than zero or greater than the semaphore's maximum.
     ///
     /// See [`Semaphore::modify()`] for more info.
-    pub fn try_modify(&mut self, count: i32) -> bool {
+    pub fn try_modify(&mut self, count: ICount) -> bool {
         let current = self.current.load(Ordering::Relaxed);
-        match (current as i64).checked_add(count as i64) {
-            Some(sum) if sum <= (self.max as i64) => {},
+        match (current as INext).checked_add(count as INext) {
+            Some(sum) if sum <= (self.max as INext) => {},
             _ => return false,
         };
 
         match count.signum() {
             0 => return true,
             1 => {
-                self.current.fetch_add(count as u32, Ordering::Relaxed);
-                self.count.fetch_add(count as u32, Ordering::Relaxed);
+                self.current.fetch_add(count as Count, Ordering::Relaxed);
+                self.count.fetch_add(count as Count, Ordering::Relaxed);
             },
             -1 => {
-                self.current.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
-                self.count.fetch_add((count as i64).abs() as u32, Ordering::Relaxed);
+                self.current.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                self.count.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
             }
             _ => unsafe { core::hint::unreachable_unchecked(); },
         };
