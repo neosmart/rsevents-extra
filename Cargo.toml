@@ -1,7 +1,7 @@
 [package]
 name = "rsevents-extra"
-description = "Useful events built on top of rsevents. Includes countdown event."
-version = "0.1.0"
+description = "Synchronization objects built on top of rsevents. Semaphore, countdown event, and more."
+version = "0.2.0"
 edition = "2018"
 authors = ["Mahmoud Al-Qudsi <mqudsi@neosmart.net>",
 		"NeoSmart Technologies <https://neosmart.net/>"]
