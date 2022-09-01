@@ -11,6 +11,7 @@ readme = "README.md"
 keywords = ["synchronization", "events", "countdown"]
 categories = ["concurrency", "asynchronous"]
 license = "MIT"
+documentation = "https://docs.rs/rsevents-extra/latest/rsevents_extra/"
 
 [dependencies]
 rsevents = { version = "0.3.1" }
