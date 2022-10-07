@@ -373,6 +373,13 @@ impl Semaphore
 
         return true;
     }
+
+    /// Returns the currently available count of the semaphore.
+    ///
+    /// Note that this may race with other calls such as `release()` or `wait()`.
+    pub fn count(&self) -> Count {
+        self.count.load(Ordering::Relaxed)
+    }
 }
 
 impl<'a> Awaitable<'a> for Semaphore {
