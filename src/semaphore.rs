@@ -238,10 +238,9 @@ impl Semaphore
         }
     }
 
-    #[doc(hidden)]
     /// Directly modifies the maximum currently available concurrency `current`, without regard for
     /// overflow or a violation of the semaphore's maximum allowed count.
-    pub unsafe fn modify_current(&self, count: ICount) {
+    unsafe fn modify_current(&self, count: ICount) {
         match count.signum() {
             0 => return,
             1 => self.current.fetch_add(count as Count, Ordering::Relaxed),
