@@ -168,7 +168,7 @@ impl Semaphore
                 self.count.load(Ordering::Relaxed)
             } else {
                 // We can't just fetch_sub(1) and check the result because we might underflow.
-                match self.count.compare_exchange(count, count - 1, Ordering::Relaxed, Ordering::Relaxed) {
+                match self.count.compare_exchange_weak(count, count - 1, Ordering::Relaxed, Ordering::Relaxed) {
                     Ok(_) => {
                         // We obtained the semaphore.
                         let new_count = count - 1;
