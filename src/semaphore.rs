@@ -168,7 +168,7 @@ impl Semaphore
                 self.count.load(Ordering::Relaxed)
             } else {
                 // We can't just fetch_sub(1) and check the result because we might underflow.
-                match self.count.compare_exchange_weak(count, count - 1, Ordering::Relaxed, Ordering::Relaxed) {
+                match self.count.compare_exchange_weak(count, count - 1, Ordering::Acquire, Ordering::Relaxed) {
                     Ok(_) => {
                         // We obtained the semaphore.
                         let new_count = count - 1;
@@ -228,7 +228,7 @@ impl Semaphore
     /// Directly increments the available concurrency count by `count`, without checking if this
     /// would violate the maximum available concurrency count.
     unsafe fn release_internal(&self, count: Count) {
-        let prev_count = self.count.fetch_add(count, Ordering::Relaxed);
+        let prev_count = self.count.fetch_add(count, Ordering::Release);
 
         // We only need to set the AutoResetEvent if the count was previously exhausted.
         // In all other cases, the last thread to obtain the semaphore would have already set the
