@@ -100,7 +100,7 @@ impl CountdownEvent {
     /// event enters a [set](EventState::Set) state and any outstanding or future calls to
     /// [`CountdownEvent::wait()`] will be let through without blocking (until [the event is
     /// reset](CountdownEvent::reset()) [or incremented](Self::increment())).
-    pub fn tick(&self) {
+    pub fn decrement(&self) {
         let prev = self.count.fetch_sub(1, Ordering::Relaxed);
         if prev == 1 {
             self.event2.wait();
@@ -108,9 +108,17 @@ impl CountdownEvent {
                 self.event.set();
             }
             self.event2.set();
-        } else if prev == 0 {
+        }
+        #[cfg(debug_assertions)]
+        if prev == 0 {
             panic!("tick() called more times than outstanding jobs!");
         }
+    }
+
+    /// An alias for [`decrement()`](Self::decrement) for backwards compatibility purposes.
+    #[inline(always)]
+    pub fn tick(&self) {
+        self.decrement()
     }
 
     /// Increment the internal count (e.g. to add a work item).
