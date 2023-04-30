@@ -1,4 +1,4 @@
-use rsevents::{Awaitable, EventState, ManualResetEvent, TimeoutError};
+use rsevents::{AutoResetEvent, Awaitable, EventState, ManualResetEvent, TimeoutError};
 use std::convert::{Infallible, TryInto};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
@@ -62,7 +62,12 @@ pub struct CountdownEvent {
     /// response to a `tick()` call and never reset it), it means calls to `CountdownEvent::count()`
     /// would report the overflow and we couldn't intercept it.
     count: AtomicIsize,
+    /// The core synchronization event, waited on by calls to `wait()` but only accessed on the
+    /// final call to `tick()`.
     event: ManualResetEvent,
+    /// The event used to adjudicate disputes between calls to `reset()` or `increment()` coinciding
+    /// with the final call to `tick()`.
+    event2: AutoResetEvent,
 }
 
 impl CountdownEvent {
@@ -85,6 +90,7 @@ impl CountdownEvent {
             } else {
                 EventState::Unset
             }),
+            event2: AutoResetEvent::new(EventState::Set),
         };
 
         result
@@ -93,23 +99,36 @@ impl CountdownEvent {
     /// Decrements the internal countdown. When the internal countdown reaches zero, the countdown
     /// event enters a [set](EventState::Set) state and any outstanding or future calls to
     /// [`CountdownEvent::wait()`] will be let through without blocking (until [the event is
-    /// reset](CountdownEvent::reset())).
-    ///
-    /// It is safe to call this more times than the countdown event was initialized or reset to, in
-    /// which case [the reported count](Self::count()) will saturate at zero.
+    /// reset](CountdownEvent::reset()) [or incremented](Self::increment())).
     pub fn tick(&self) {
-        let old_ticks = self.count.fetch_sub(1, Ordering::Relaxed);
-        if old_ticks == 1 {
-            self.event.set();
+        let prev = self.count.fetch_sub(1, Ordering::Relaxed);
+        if prev == 1 {
+            self.event2.wait();
+            if self.count.load(Ordering::Relaxed) == 0 {
+                self.event.set();
+            }
+            self.event2.set();
+        } else if prev == 0 {
+            panic!("tick() called more times than outstanding jobs!");
+        }
+    }
+
+    /// Increment the internal count (e.g. to add a work item).
+    ///
+    /// This resets the event (makes it unavailable) if the previous count was zero.
+    pub fn increment(&self) {
+        let prev = self.count.fetch_add(1, Ordering::Relaxed);
+        if prev == 0 {
+            self.event2.wait();
+            if self.count.load(Ordering::Relaxed) == 0 {
+                self.event.set();
+            }
+            self.event2.set();
         }
     }
 
     /// Resets a countdown event to the specified `count`. If a count of zero is specified, the
     /// countdown event is immediately set.
-    ///
-    /// Beware that unless you have a mutable reference to the countdown event, calls to `reset()`
-    /// may race with calls to [`tick()`](Self::tick) from any still-running threads with a
-    /// reference to the countdown event!
     pub fn reset(&self, count: usize) {
         let count: isize = match count.try_into() {
             Ok(count) => count,
@@ -117,15 +136,17 @@ impl CountdownEvent {
         };
 
         self.count.store(count, Ordering::Relaxed);
-        if count == 0 {
+        if self.count.load(Ordering::Relaxed) == 0 {
+            self.event2.wait();
+            if self.count.load(Ordering::Relaxed) == 0 {
+                self.event.set();
+            }
+            self.event2.set();
             self.event.set();
-        } else {
-            self.event.reset();
         }
     }
 
-    /// Get the current internal countdown value, saturated at zero in case [`tick()`](Self::tick)
-    /// is called beyond the original count.
+    /// Get the current internal countdown value.
     pub fn count(&self) -> usize {
         match self.count.load(Ordering::Relaxed) {
             count @ 0.. => count as usize,
