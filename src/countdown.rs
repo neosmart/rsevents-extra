@@ -1,4 +1,4 @@
-use rsevents::{Awaitable, ManualResetEvent, EventState, TimeoutError};
+use rsevents::{Awaitable, EventState, ManualResetEvent, TimeoutError};
 use std::convert::{Infallible, TryInto};
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
@@ -80,7 +80,11 @@ impl CountdownEvent {
 
         let result = Self {
             count: AtomicIsize::new(count),
-            event: ManualResetEvent::new(if count == 0 { EventState::Set } else { EventState::Unset }),
+            event: ManualResetEvent::new(if count == 0 {
+                EventState::Set
+            } else {
+                EventState::Unset
+            }),
         };
 
         result

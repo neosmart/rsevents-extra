@@ -1,8 +1,8 @@
+use rsevents::{AutoResetEvent, Awaitable, EventState, TimeoutError};
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::convert::Infallible;
 use std::time::Duration;
-use rsevents::{Awaitable, EventState, AutoResetEvent, TimeoutError};
 
 type Count = u16;
 type AtomicCount = AtomicU16;
@@ -122,8 +122,7 @@ enum Timeout {
     Bounded(Duration),
 }
 
-impl Semaphore
-{
+impl Semaphore {
     /// Create a new [`Semaphore`] with a maximum available concurrency count of `max_count`
     /// and an initial available concurrency count of `initial_count`.
     pub const fn new(initial_count: Count, max_count: Count) -> Self {
@@ -168,7 +167,12 @@ impl Semaphore
                 self.count.load(Ordering::Relaxed)
             } else {
                 // We can't just fetch_sub(1) and check the result because we might underflow.
-                match self.count.compare_exchange_weak(count, count - 1, Ordering::Acquire, Ordering::Relaxed) {
+                match self.count.compare_exchange_weak(
+                    count,
+                    count - 1,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                ) {
                     Ok(_) => {
                         // We obtained the semaphore.
                         let new_count = count - 1;
@@ -177,7 +181,7 @@ impl Semaphore
                             self.event.set();
                         }
                         break;
-                    },
+                    }
                     Err(count) => count,
                 }
             }
@@ -216,7 +220,10 @@ impl Semaphore
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
     /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
     /// time limit elapses without the semaphore becoming available to the calling thread.
-    pub fn wait_for<'a>(&'a self, limit: Duration) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+    pub fn wait_for<'a>(
+        &'a self,
+        limit: Duration,
+    ) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         match limit {
             Duration::ZERO => self.try_wait(Timeout::None)?,
             timeout => self.try_wait(Timeout::Bounded(timeout))?,
@@ -244,7 +251,9 @@ impl Semaphore
         match count.signum() {
             0 => return,
             1 => self.current.fetch_add(count as Count, Ordering::Relaxed),
-            -1 => self.current.fetch_sub((count as INext).abs() as Count, Ordering::Relaxed),
+            -1 => self
+                .current
+                .fetch_sub((count as INext).abs() as Count, Ordering::Relaxed),
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
     }
@@ -277,7 +286,7 @@ impl Semaphore
     pub fn modify(&mut self, count: ICount) {
         let current = self.current.load(Ordering::Relaxed);
         match (current as INext).checked_add(count as INext) {
-            Some(sum) if sum <= (self.max as INext) => {},
+            Some(sum) if sum <= (self.max as INext) => {}
             _ => panic!("An invalid count was supplied to Semaphore::modify()"),
         };
 
@@ -286,12 +295,16 @@ impl Semaphore
             1 => {
                 self.current.fetch_add(count as Count, Ordering::Relaxed);
                 self.count.fetch_add(count as Count, Ordering::Relaxed);
-            },
-            -1 => {
-                self.current.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
-                self.count.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
             }
-            _ => unsafe { core::hint::unreachable_unchecked(); },
+            -1 => {
+                self.current
+                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                self.count
+                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+            }
+            _ => unsafe {
+                core::hint::unreachable_unchecked();
+            },
         }
     }
 
@@ -304,7 +317,7 @@ impl Semaphore
     pub fn try_modify(&mut self, count: ICount) -> bool {
         let current = self.current.load(Ordering::Relaxed);
         match (current as INext).checked_add(count as INext) {
-            Some(sum) if sum <= (self.max as INext) => {},
+            Some(sum) if sum <= (self.max as INext) => {}
             _ => return false,
         };
 
@@ -313,12 +326,16 @@ impl Semaphore
             1 => {
                 self.current.fetch_add(count as Count, Ordering::Relaxed);
                 self.count.fetch_add(count as Count, Ordering::Relaxed);
-            },
-            -1 => {
-                self.current.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
-                self.count.fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
             }
-            _ => unsafe { core::hint::unreachable_unchecked(); },
+            -1 => {
+                self.current
+                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                self.count
+                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+            }
+            _ => unsafe {
+                core::hint::unreachable_unchecked();
+            },
         };
 
         return true;
@@ -336,13 +353,15 @@ impl Semaphore
         // Increment the "current maximum" which includes borrowed semaphore instances.
         let prev_count = self.current.fetch_add(count, Ordering::Relaxed);
         match prev_count.checked_add(count) {
-            Some(sum) if sum <= self.max => { },
+            Some(sum) if sum <= self.max => {}
             _ => panic!("Semaphore::release() called with an inappropriate count!"),
         }
         // Increment the actual "currently available" count to match. The two fields do not need to
         // be updated atomically because we only care that the previous operation succeeded, but do
         // not need to modify this variable contingent on that one.
-        unsafe { self.release_internal(count); }
+        unsafe {
+            self.release_internal(count);
+        }
     }
 
     /// Attempts to increment the available concurrency counter by `count`, and returns `false` if
@@ -357,10 +376,15 @@ impl Semaphore
         let mut prev_count = self.current.load(Ordering::Relaxed);
         loop {
             match prev_count.checked_add(count) {
-                Some(sum) if sum <= self.max => { },
+                Some(sum) if sum <= self.max => {}
                 _ => return false,
             }
-            match self.current.compare_exchange_weak(prev_count, prev_count + count, Ordering::Relaxed, Ordering::Relaxed) {
+            match self.current.compare_exchange_weak(
+                prev_count,
+                prev_count + count,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
                 Ok(_) => break,
                 Err(new_count) => prev_count = new_count,
             }
@@ -369,7 +393,9 @@ impl Semaphore
         // Increment the actual "currently available" count to match. The two fields do not need to
         // be updated atomically because we only care that the previous operation succeeded, but do
         // not need to modify this variable contingent on that one.
-        unsafe { self.release_internal(count); }
+        unsafe {
+            self.release_internal(count);
+        }
 
         return true;
     }
@@ -403,7 +429,10 @@ impl<'a> Awaitable<'a> for Semaphore {
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
     /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
     /// time limit elapses without the semaphore becoming available to the calling thread.
-    fn try_wait_for(&'a self, limit: Duration) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+    fn try_wait_for(
+        &'a self,
+        limit: Duration,
+    ) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::Bounded(limit))?;
         Ok(SemaphoreGuard { semaphore: &self })
     }
@@ -436,7 +465,9 @@ impl SemaphoreGuard<'_> {
     /// A `SemaphoreGuard` instance should never be passed to `std::mem::forget()` directly, as that
     /// would violate the internal contract; this method should be used instead.
     pub fn forget(self) {
-        unsafe { self.semaphore.modify_current(-1); }
+        unsafe {
+            self.semaphore.modify_current(-1);
+        }
         core::mem::forget(self);
     }
 }
@@ -449,7 +480,9 @@ impl Debug for SemaphoreGuard<'_> {
 
 impl Drop for SemaphoreGuard<'_> {
     fn drop(&mut self) {
-        unsafe { self.semaphore.release_internal(1); }
+        unsafe {
+            self.semaphore.release_internal(1);
+        }
     }
 }
 
@@ -457,9 +490,9 @@ impl Drop for SemaphoreGuard<'_> {
 mod test {
     use super::Count;
     use crate::Semaphore;
+    use rsevents::Awaitable;
     use std::thread;
     use std::time::Duration;
-    use rsevents::Awaitable;
 
     #[test]
     fn uncontested_semaphore() {
