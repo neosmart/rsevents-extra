@@ -206,12 +206,13 @@ impl Semaphore {
     /// count (possibly preventing other threads from obtaining the semaphore) until
     /// [`Semaphore::release()`] is called (which happens automatically when the `SemaphoreGuard`
     /// concurrency token is dropped).
+    #[must_use = "The semaphore count is immediately re-incremented if the guard is dropped"]
     pub fn wait<'a>(&'a self) -> SemaphoreGuard<'a> {
         self.try_wait(Timeout::Infinite).unwrap();
         SemaphoreGuard { semaphore: &self }
     }
 
-    #[allow(unused)]
+    #[cfg_attr(not(test), allow(unused))]
     fn wait0<'a>(&'a self) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
         Ok(SemaphoreGuard { semaphore: &self })
@@ -220,6 +221,7 @@ impl Semaphore {
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
     /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
     /// time limit elapses without the semaphore becoming available to the calling thread.
+    #[must_use = "The semaphore count is immediately re-incremented if the guard is dropped"]
     pub fn wait_for<'a>(
         &'a self,
         limit: Duration,
