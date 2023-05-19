@@ -1,3 +1,6 @@
+#![allow(clippy::bool_assert_comparison)]
+#![allow(clippy::absurd_extreme_comparisons)]
+
 use rsevents::{AutoResetEvent, Awaitable, EventState, TimeoutError};
 use std::convert::Infallible;
 use std::fmt::Debug;
@@ -193,7 +196,7 @@ impl Semaphore {
         }
         debug_assert!(count <= self.max);
 
-        return Ok(());
+        Ok(())
     }
 
     /// Attempts to obtain access to the resource or code protected by the `Semaphore`, subject to
@@ -207,30 +210,27 @@ impl Semaphore {
     /// [`Semaphore::release()`] is called (which happens automatically when the `SemaphoreGuard`
     /// concurrency token is dropped).
     #[must_use = "The semaphore count is immediately re-incremented if the guard is dropped"]
-    pub fn wait<'a>(&'a self) -> SemaphoreGuard<'a> {
+    pub fn wait(&self) -> SemaphoreGuard<'_> {
         self.try_wait(Timeout::Infinite).unwrap();
-        SemaphoreGuard { semaphore: &self }
+        SemaphoreGuard { semaphore: self }
     }
 
     #[cfg_attr(not(test), allow(unused))]
-    fn wait0<'a>(&'a self) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+    fn wait0(&self) -> Result<SemaphoreGuard<'_>, rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
-        Ok(SemaphoreGuard { semaphore: &self })
+        Ok(SemaphoreGuard { semaphore: self })
     }
 
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
     /// semaphore becomes available or a [`TimeoutError`](rsevents::TimeoutError) if the specified
     /// time limit elapses without the semaphore becoming available to the calling thread.
     #[must_use = "The semaphore count is immediately re-incremented if the guard is dropped"]
-    pub fn wait_for<'a>(
-        &'a self,
-        limit: Duration,
-    ) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
+    pub fn wait_for(&self, limit: Duration) -> Result<SemaphoreGuard<'_>, rsevents::TimeoutError> {
         match limit {
             Duration::ZERO => self.try_wait(Timeout::None)?,
             timeout => self.try_wait(Timeout::Bounded(timeout))?,
         };
-        Ok(SemaphoreGuard { semaphore: &self })
+        Ok(SemaphoreGuard { semaphore: self })
     }
 
     #[inline]
@@ -255,7 +255,7 @@ impl Semaphore {
             1 => self.current.fetch_add(count as Count, Ordering::Relaxed),
             -1 => self
                 .current
-                .fetch_sub((count as INext).abs() as Count, Ordering::Relaxed),
+                .fetch_sub((count as INext).unsigned_abs() as Count, Ordering::Relaxed),
             _ => unsafe { core::hint::unreachable_unchecked() },
         };
     }
@@ -293,16 +293,16 @@ impl Semaphore {
         };
 
         match count.signum() {
-            0 => return,
+            0 => (),
             1 => {
                 self.current.fetch_add(count as Count, Ordering::Relaxed);
                 self.count.fetch_add(count as Count, Ordering::Relaxed);
             }
             -1 => {
                 self.current
-                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                    .fetch_add((count as INext).unsigned_abs() as Count, Ordering::Relaxed);
                 self.count
-                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                    .fetch_add((count as INext).unsigned_abs() as Count, Ordering::Relaxed);
             }
             _ => unsafe {
                 core::hint::unreachable_unchecked();
@@ -331,16 +331,16 @@ impl Semaphore {
             }
             -1 => {
                 self.current
-                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                    .fetch_add((count as INext).unsigned_abs() as Count, Ordering::Relaxed);
                 self.count
-                    .fetch_add((count as INext).abs() as Count, Ordering::Relaxed);
+                    .fetch_add((count as INext).unsigned_abs() as Count, Ordering::Relaxed);
             }
             _ => unsafe {
                 core::hint::unreachable_unchecked();
             },
         };
 
-        return true;
+        true
     }
 
     /// Increments the available concurrency by `count`, and panics if this results in a count that
@@ -399,7 +399,7 @@ impl Semaphore {
             self.release_internal(count);
         }
 
-        return true;
+        true
     }
 
     /// Returns the currently available count of the semaphore.
@@ -425,7 +425,7 @@ impl<'a> Awaitable<'a> for Semaphore {
     /// [`Semaphore::release()`] is called.
     fn try_wait(&'a self) -> Result<SemaphoreGuard<'a>, Infallible> {
         self.try_wait(Timeout::Infinite).unwrap();
-        Ok(SemaphoreGuard { semaphore: &self })
+        Ok(SemaphoreGuard { semaphore: self })
     }
 
     /// Attempts a time-bounded wait against the `Semaphore`, returning `Ok(())` if and when the
@@ -436,14 +436,14 @@ impl<'a> Awaitable<'a> for Semaphore {
         limit: Duration,
     ) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::Bounded(limit))?;
-        Ok(SemaphoreGuard { semaphore: &self })
+        Ok(SemaphoreGuard { semaphore: self })
     }
 
     /// Attempts to obtain the `Semaphore` without waiting, returning `Ok(())` if the semaphore
     /// is immediately available or a [`TimeoutError`](rsevents::TimeoutError) otherwise.
     fn try_wait0(&'a self) -> Result<SemaphoreGuard<'a>, rsevents::TimeoutError> {
         self.try_wait(Timeout::None)?;
-        Ok(SemaphoreGuard { semaphore: &self })
+        Ok(SemaphoreGuard { semaphore: self })
     }
 }
 

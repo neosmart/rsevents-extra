@@ -83,7 +83,7 @@ impl CountdownEvent {
             _ => panic!("count cannot exceeed isize::MAX"),
         };
 
-        let result = Self {
+        Self {
             count: AtomicIsize::new(count),
             event: ManualResetEvent::new(if count == 0 {
                 EventState::Set
@@ -91,9 +91,7 @@ impl CountdownEvent {
                 EventState::Unset
             }),
             event2: AutoResetEvent::new(EventState::Set),
-        };
-
-        result
+        }
     }
 
     /// Decrements the internal countdown. When the internal countdown reaches zero, the countdown
